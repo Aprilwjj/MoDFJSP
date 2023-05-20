@@ -82,8 +82,8 @@ class SO_DFJSP_Environment(FJSP):
         提取状态向量
         更新相关参数
         """
-        m_idle_ratio = len(self.machine_idle_list) / self.machine_count  # 空闲机器数占总机器数的比例
-        # m_idle_ratio = self.machine_count
+        # M = len(self.machine_idle_list) / self.machine_count  # 空闲机器数占总机器数的比例
+        M = self.machine_count
         ct_m_ave = self.ct_m_ave  # 机器的平均完工时间
         ct_m_std = math.sqrt(sum(math.pow(machine_object.time_end - ct_m_ave, 2) for m, machine_object
                                  in self.machine_dict.items())/self.machine_count)   # 2-机器完工时间标准差
@@ -96,7 +96,7 @@ class SO_DFJSP_Environment(FJSP):
         gap_std = math.sqrt(sum(math.pow(kind_task_object.gap_rate - gap_ave, 2) for (r, j), kind_task_object
                                 in self.kind_task_dict.items())/len(self.kind_task_tuple))  # 6-工序类型gap_rj标准差
         dro_a, dro_e, drj_a, drj_e = self.update_parameter()  # 返回7-工序实际和8-估计延迟率、9-工件实际和10-估计延迟率+更新相关参数
-        return [m_idle_ratio, ct_m_std, cro_ave, cro_std, gap_ave, gap_std, dro_a, dro_e, drj_a, drj_e]
+        return [M, ct_m_std, cro_ave, cro_std, gap_ave, gap_std, dro_a, dro_e, drj_a, drj_e]
 
     def update_parameter(self):
         """
@@ -344,15 +344,21 @@ class SO_DFJSP_Environment(FJSP):
             else:
                 reward_2 = -1
             return reward_1 + reward_2
-        elif function_selected == 4:
-            if self.delay_time_sum_unprocessed < self.delay_time_sum_unprocessed_last:
+        elif function_selected == 4:  # 基于总延期时间和gap均值的复合奖励
+            if self.delay_time_sum < self.delay_time_sum_last:
                 reward_1 = 1
-            elif self.delay_time_sum_unprocessed == self.delay_time_sum_unprocessed_last:
+            elif self.delay_time_sum == self.delay_time_sum:
                 reward_1 = 0
             else:
                 reward_1 = -1
-            return reward_1
-        elif function_selected == 5:
+            if self.gap_ave_value < self.gap_ave_value_last:
+                reward_2 = 1
+            elif self.gap_ave_value == self.gap_ave_value_last:
+                reward_2 = 0
+            else:
+                reward_2 = -1
+            return reward_1 + reward_2
+        elif function_selected == 5:  # 纯gap均值奖励
             if self.gap_ave_value < self.gap_ave_value_last:
                 reward_2 = 1
             elif self.gap_ave_value == self.gap_ave_value_last:
@@ -401,7 +407,7 @@ if __name__ == '__main__':
     # 随机选择动作测试环境
     while not env_object.done:
         # action = (random.choice([0, 1, 2, 3, 4, 5]), random.choice([0, 1, 2, 3, 4]))
-        action = [2, 0]
+        action = [2, 2]
         next_state, reward, done = env_object.step(action)
         replay_list.append([state, action, next_state, reward, done])
         state = next_state

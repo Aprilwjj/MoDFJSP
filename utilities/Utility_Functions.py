@@ -17,7 +17,7 @@ def normalise_rewards(rewards):
     """Normalises rewards to mean 0 and standard deviation 1"""
     mean_reward = np.mean(rewards)
     std_reward = np.std(rewards)
-    return (rewards - mean_reward) / (std_reward + 1e-8) #1e-8 added for stability
+    return (rewards - mean_reward) / (std_reward + 1e-8) #  1e-8 added for stability
 
 def create_actor_distribution(action_types, actor_output, action_size):
     """Creates a distribution that the actor can then use to randomly draw actions"""

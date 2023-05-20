@@ -17,9 +17,10 @@ from environments.SO_DFJSP import SO_DFJSP_Environment
 import torch.nn.functional as F
 from torch import nn
 from visdom import Visdom
+from utilities.Utility_Class import SaveResult
 
 # 监控训练过程
-window_name = 'Double Actor state(1)+action()+reward(1)'
+window_name = 'Double Actor state(1)+action(1)+reward(1)'
 vis = Visdom()
 win = window_name
 title = window_name
@@ -86,7 +87,7 @@ class CriticNet(nn.Module):
 
 class DA3C(Base_Agent, Config):
     """Actor critic A3C algorithm"""
-    agent_name = "A3C"
+    agent_name = "DA3C"
     def __init__(self):
         Base_Agent.__init__(self)  # 继承基础智能体类
         Config.__init__(self)  # 继承算法超参数类
@@ -112,7 +113,7 @@ class DA3C(Base_Agent, Config):
         self.actor_machine_optimizer = SharedAdam(self.actor_net_machine.parameters(), lr=self.learning_rate, eps=1e-4)
         self.critic_optimizer = SharedAdam(self.critic_net.parameters(), lr=self.learning_rate, eps=1e-4)
         # 显示训练结果
-        self.delay_time = 0  # 当前周期测试实例总的延期时间
+        self.delay_time = {'epoch': [], 'objective1': []}  # 当前周期测试实例总的延期时间
         self.episode_number = 0  # 当前训练周期
 
     def run_n_episodes(self):
@@ -233,7 +234,7 @@ class Actor_Critic_Worker(torch.multiprocessing.Process):
         self.episode_log_action_task_probabilities = []  # 动作log概率列表
         self.episode_log_action_machine_probabilities = []  # 机器策略网络动作log概率列表
         self.critic_outputs = []  # 评论家输出的V值列表
-        self.delay_time = delay_time  # 总延期时间
+        self.delay_time = delay_time  # 总延期时间字典
 
     def generated_new_environment(self):
         """返回新环境对象"""
@@ -261,8 +262,6 @@ class Actor_Critic_Worker(torch.multiprocessing.Process):
             self.episode_log_action_task_probabilities = []  # 工序策略网络动作log概率列表
             self.episode_log_action_machine_probabilities = []  # 机器策略网络动作log概率列表
             self.critic_outputs = []  # 评论家输出的V值列表
-            task_action_ratio = [0 for i in range(self.actions_size[0])]  # 每个工序规则的比例
-            machine_action_ratio = [0 for i in range(self.actions_size[1])]  # 每个机器规则的比例
             # 采样一条轨迹
             while not done:
                 action_task, action_task_log_prob = self.pick_action_and_log_prob(self.local_actor_task_model, state,
@@ -272,8 +271,6 @@ class Actor_Critic_Worker(torch.multiprocessing.Process):
                                                                                         state_add, epsilon_exploration)
                 critic_outputs = self.get_critic_value(self.local_critic_model, state)
                 actions = np.array([action_task, action_machine])  # 二维离散动作
-                task_action_ratio[actions[0]] += 1
-                machine_action_ratio[actions[1]] += 1
                 next_state, reward, done = self.environment.step(actions)
                 self.episode_states.append(state)
                 self.episode_actions.append(actions)
@@ -282,15 +279,13 @@ class Actor_Critic_Worker(torch.multiprocessing.Process):
                 self.episode_log_action_machine_probabilities.append(action_machine_log_prob)
                 self.critic_outputs.append(critic_outputs)
                 state = next_state
-
+            # 计算损失和优势函数，并传入梯度值
             critic_loss, actor_task_loss, actor_machine_loss = self.calculate_total_loss()
             self.put_gradients_in_queue(critic_loss, actor_task_loss, actor_machine_loss)
             self.episode_number += 1
-            vis.line(X=[self.counter.value], Y=[self.environment.delay_time_sum], win=win, update='append')
-            print("工序各规则比例：", [task_action_ratio[i]/sum(task_action_ratio) for i in range(len(task_action_ratio))])
-            print("机器各规则比例：", [machine_action_ratio[i]/sum(machine_action_ratio) for i in range(len(machine_action_ratio))])
+            # vis.line(X=[self.counter.value], Y=[self.environment.delay_time_sum], win=win, update='append')
             print("运行总步数：", self.counter.value)
-            # 每间隔10个周期运行一次测试算例并动态绘制目标值曲线
+            # 每间隔1个周期运行一次测试算例并动态绘制目标值曲线
             with self.counter.get_lock():
                 self.counter.value += 1
                 state = self.environment_test.reset()
@@ -304,6 +299,9 @@ class Actor_Critic_Worker(torch.multiprocessing.Process):
                     state = next_state
                 vis.line(X=[self.counter.value], Y=[self.environment_test.delay_time_sum], win=win, update='append')
                 print("测试算例总的延期时间：", self.environment_test.delay_time_sum)
+                # 保存数据
+                self.delay_time['epoch'].append(self.counter.value)
+                self.delay_time['objective1'].append(self.environment_test.delay_time_sum)
 
     def calculate_new_exploration(self):
         """计算新的勘探参数。它在当前的上下3X范围内随机选取一个点"""
@@ -428,3 +426,5 @@ class Actor_Critic_Worker(torch.multiprocessing.Process):
 if __name__ == '__main__':
     da3c_object = DA3C()
     da3c_object.run_n_episodes()
+
+

@@ -19,9 +19,9 @@ class Config():
             "DA3C": {
                 "learning_rate": 0.0003,
                 "discount_rate": 0.99,
-                "num_episodes_to_run": 3000,
+                "num_episodes_to_run": 2000,
                 "gradient_clipping_norm": 1.0,
-                "clip_rewards": False,
+                "clip_rewards": True,
                 "normalise_rewards": True,
                 "epsilon_decay_rate_denominator": 1.0,
                 "exploration_worker_difference": 2.0
@@ -40,9 +40,13 @@ class Config():
                 "learning_rate": 0.0003,
                 "discount_rate": 0.99,
             },
-            "PPO": {
+            "DPPO": {
                 "learning_rate": 0.0003,
                 "discount_rate": 0.99,
+                "episodes_per_learning_round": 10,
+                "learning_iterations_per_round": 10,
+                "clip_epsilon": 0.5,
+                "gradient_clipping_norm": 1.0,
             }}
 
         return parameters
