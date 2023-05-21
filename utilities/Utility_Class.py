@@ -15,14 +15,14 @@ plt.rcParams['axes.unicode_minus'] = False  # 解决负号'-'显示为方块的�
 import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-"""异常类"""
 class MyError(Exception):
+    """异常类"""
     def __init__(self, message):
         self.message = message
         super().__init__(self.message)
 
-"""画图类"""
 class FigGan():
+    """画图类"""
     def __init__(self, object):
         self.kind_dict = object.kind_dict
 
@@ -38,56 +38,21 @@ class FigGan():
                              fontdict={'fontsize': 6})
         plt.show()
 
-"""保存训练结果类"""
-class SaveResult():
-    def __init__(self, algorithm_name, name_csv, data):
-        self.name = algorithm_name  # 算法名字
-        self.data = data  # 训练数据
-        self.name_csv = name_csv  # csv文件名
-        self.objective_count = len(self.data) - 1  # 目标个数
-        self.file_name = self.name  # 文件名
+class AddData():
+    """添加训练数据"""
+    def __init__(self, path_file_name):
+        self.file_name = path_file_name
 
-    def write_csv(self):
-        """写入函数"""
-        file_path = 'D:/Python project/Deep_Reinforcement_Learning_FJSP/results'
-        os.makedirs(os.path.join(file_path, self.file_name), exist_ok=True)  # 新建实例文件夹
-        file_csv = {self.name_csv + '.csv': ['epoch'] + ['objective' + str(i+1) for i in range(self.objective_count)]}
-        best_mean_std = {'best': [], 'mean': [], 'std': []}
-        for csv_name, header in file_csv.items():
-            data_file = os.path.join(file_path, self.file_name, csv_name)
-            with open(data_file, 'w', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow(header)
-                # 写入最优值，均值和标准差
-                rows = []
-                for key, value in self.data.items():
-                    if key != 'epoch':
-                        data = np.array(value)
-                        mean = np.mean(data)
-                        min_value = np.min(data)
-                        std_dev = np.std(data)
-                        best_mean_std['best'].append(min_value)
-                        best_mean_std['mean'].append(mean)
-                        best_mean_std['std'].append(std_dev)
-                for key, value in best_mean_std.items():
-                    rows.append([key] + value)
-                writer.writerows(rows)
-                # 写入每个周期的数据
-                writer.writerow(header)
-                rows = []  # 初始化写入数据
-                for row in range(len(self.data['epoch'])):
-                    value_list = []
-                    for key, value in self.data.items():
-                        value_list.append(value[row])
-                    rows.append(value_list)
-                writer.writerows(rows)
-        print("写入完成")
-
+    def add_data(self, data):
+        with open(self.file_name, mode='a', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(data)
 
 # 测试各类
 if __name__ == '__main__':
-    figure_object = FigGan
-    data_training = {'epoch': [1, 2, 3], 'objective1': [2, 8, 4]}
-    result_data = SaveResult(algorithm_name='DA3C', name_csv='training', data=data_training)
-    result_data.write_csv()
+    # 添加训练数据
+    data_training = [1, 2, 3]
+    path_file_name = 'D:/Python project/Deep_Reinforcement_Learning_FJSP/results/DA3C/training.csv'
+    result_data = AddData(path_file_name)
+    result_data.add_data(data_training)
 

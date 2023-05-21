@@ -3,7 +3,6 @@
 两个网络：评论家网络+24动作网络
 """
 import copy
-import pickle
 import random
 import time
 import numpy as np
@@ -18,11 +17,18 @@ from environments.SO_DFJSP import SO_DFJSP_Environment
 import torch.nn.functional as F
 from torch import nn
 from visdom import Visdom
+from utilities.Utility_Class import AddData
 
+# 训练结果数据保存位置
+path_file_name = 'D:/Python project/Deep_Reinforcement_Learning_FJSP/results/DA3C/single_training.csv'
+add_data_object = AddData(path_file_name)
 # 监控训练过程
+window_name = 'Single Actor state(1)+action(1)+reward(1)'
 vis = Visdom()
-win = 'single_actor'
-vis.line(X=[0], Y=[0], win=win, opts=dict(title='Single actor', xlabel='epoch', ylable='delay_time', xmin=30))
+win = window_name
+title = window_name
+vis.line(X=[0], Y=[0], win=win, opts=dict(title=title, xlabel='epoch', ylable='total_delay_time',
+                                          font=dict(family='Times New Roman')))
 
 # 构建工序策略网络类
 class ActorNet(nn.Module):
@@ -70,7 +76,7 @@ class DA3C(Base_Agent, Config):
         Config.__init__(self)  # 继承算法超参数类
         self.num_processes = multiprocessing.cpu_count()  # 电脑线程数量|四核八线程
         self.worker_processes = max(1, self.num_processes - 5)  # 启用线程数
-        self.path = 'D:\Python project\Deep_Reinforcement_Learning_FJSP\data\generated'  # 测试算例的存储位置
+        self.path = 'D:\Python project\Deep_Reinforcement_Learning_FJSP\data\DA3C'  # 测试算例的存储位置
         self.file_name = 'DDT1.0_M15_S3'  # 测试算例的文件夹名字
         self.environment_test = SO_DFJSP_Environment(use_instance=False, path=self.path, file_name=self.file_name)  # 测试环境
         # 超参数
@@ -127,7 +133,6 @@ class DA3C(Base_Agent, Config):
             torch.save(self.actor_net.state_dict(), 'actor_net.ckpt')
         else:
             print("该训练过程未保存模型")
-        return None
 
     def update_shared_model(self, gradient_updates_queue_actor, gradient_updates_queue_critic):
         """收到工作线程的梯度{信息传入队列}，更新全局网络梯度"""
@@ -158,7 +163,7 @@ class Actor_Critic_Worker(torch.multiprocessing.Process):
         self.gradient_clipping_norm = hyper_parameter["DA3C"]["gradient_clipping_norm"]  # 梯度裁剪值
         self.discount_rate = hyper_parameter["DA3C"]["discount_rate"]  # 折扣率
         self.exploration_worker_difference = hyper_parameter["DA3C"]["exploration_worker_difference"]
-        self.normalise_rewards = False  # 标准化回报
+        self.normalise_rewards = True  # 标准化回报
         self.action_tuple = self.environment_test.action_tuple  # 动作元组
         self.action_size = len(self.action_tuple)  # 动作尺寸
         self.actor_model = actor_model  # 工序策略网络
@@ -185,15 +190,14 @@ class Actor_Critic_Worker(torch.multiprocessing.Process):
         """返回新环境对象"""
         DDT = random.uniform(0.5, 1.5)
         M = random.randint(10, 20)
-        S = random.randint(1, 1)
+        S = random.randint(1, 5)
         return SO_DFJSP_Environment(use_instance=True, DDT=DDT, M=M, S=S)
 
     def run(self):
         """开启工作线程"""
         torch.set_num_threads(1)
         for ep_ix in range(self.episodes_to_run):
-            # self.environment_train = self.generated_new_environment()   # 随机初始化算例
-            self.environment_train = self.environment_test  # 测试算例
+            self.environment_train = self.generated_new_environment()   # 随机初始化算例
             with self.optimizer_lock:  # 锁定网络更新线程网络参数
                 Base_Agent.copy_model_over(self.actor_model, self.local_actor_model)
                 Base_Agent.copy_model_over(self.critic_model, self.local_critic_model)
@@ -208,7 +212,7 @@ class Actor_Critic_Worker(torch.multiprocessing.Process):
             # 采样一条轨迹
             while not done:
                 action, action_log_prob = self.pick_action_and_log_prob(self.local_actor_model, state,
-                                                                        epsilon_exploration=0)
+                                                                        epsilon_exploration)
                 critic_output = self.get_critic_value(self.local_critic_model, state)
                 action = self.action_tuple[action]
                 next_state, reward, done = self.environment_train.step(action)
@@ -223,22 +227,19 @@ class Actor_Critic_Worker(torch.multiprocessing.Process):
             self.put_gradients_in_queue(critic_loss, actor_loss)
             # 一整个周期结束
             self.episode_number += 1
-            print("当前总的周期：", self.counter.value)
-            print("训练算例延期时间", self.environment_train.delay_time_sum)
-            vis.line(X=[self.counter.value], Y=[self.environment_train.delay_time_sum], win=win, update='append')
             # 每间隔5个周期运行一次测试算例并动态绘制目标值曲线
             with self.counter.get_lock():
                 self.counter.value += 1
-                # if self.counter.value % 1 == 0:
-                #     state = self.environment_test.reset()  # 初始化状态
-                #     done = False
-                #     while not done:
-                #         action = self.pick_action(self.actor_model, state)
-                #         action = self.action_tuple[action]
-                #         next_state, reward, done = self.environment_test.step(action)
-                #         state = next_state
-                #     print("测试算例总的延期时间：", self.environment_test.delay_time_sum)
-                #     vis.line(X=[self.counter.value], Y=[self.environment_test.delay_time_sum], win=win, update='append')
+                state = self.environment_test.reset()  # 初始化状态
+                done = False
+                while not done:
+                    action = self.pick_action(self.actor_model, state)
+                    action = self.action_tuple[action]
+                    next_state, reward, done = self.environment_test.step(action)
+                    state = next_state
+                print("测试算例总的延期时间：", self.environment_test.delay_time_sum)
+                vis.line(X=[self.counter.value], Y=[self.environment_test.delay_time_sum], win=win, update='append')
+                add_data_object.add_data([self.counter.value, self.environment_test.delay_time_sum])  # 保存数据
 
     def calculate_new_exploration(self):
         """计算新的勘探参数。它在当前的上下3X范围内随机选取一个点"""

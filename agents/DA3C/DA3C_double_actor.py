@@ -17,8 +17,11 @@ from environments.SO_DFJSP import SO_DFJSP_Environment
 import torch.nn.functional as F
 from torch import nn
 from visdom import Visdom
-from utilities.Utility_Class import SaveResult
+from utilities.Utility_Class import AddData
 
+# 训练结果数据保存位置
+path_file_name = 'D:/Python project/Deep_Reinforcement_Learning_FJSP/results/DA3C/training.csv'
+add_data_object = AddData(path_file_name)
 # 监控训练过程
 window_name = 'Double Actor state(1)+action(1)+reward(1)'
 vis = Visdom()
@@ -105,15 +108,13 @@ class DA3C(Base_Agent, Config):
         # 初始化锁对象 用来更新全局网络参数
         self.optimizer_lock = None
         # 定义策略网络和评论家网络
-        self.actor_net_task = TaskPolicyNet(input_size_1=20, hidden_size=200, hidden_layer_1=3, output_size_1=6)
-        self.actor_net_machine = MachinePolicyNet(input_size_2=21, hidden_size=200, hidden_layer_2=3, output_size_2=5)
-        self.critic_net = CriticNet(input_size=20, hidden_size=200, hidden_layer=3, output_size=1)
+        self.actor_task_model = TaskPolicyNet(input_size_1=20, hidden_size=200, hidden_layer_1=3, output_size_1=6)
+        self.actor_machine_model = MachinePolicyNet(input_size_2=21, hidden_size=200, hidden_layer_2=3, output_size_2=5)
+        self.critic_model = CriticNet(input_size=20, hidden_size=200, hidden_layer=3, output_size=1)
         # 定义优化器
-        self.actor_task_optimizer = SharedAdam(self.actor_net_task.parameters(), lr=self.learning_rate, eps=1e-4)
-        self.actor_machine_optimizer = SharedAdam(self.actor_net_machine.parameters(), lr=self.learning_rate, eps=1e-4)
-        self.critic_optimizer = SharedAdam(self.critic_net.parameters(), lr=self.learning_rate, eps=1e-4)
-        # 显示训练结果
-        self.delay_time = {'epoch': [], 'objective1': []}  # 当前周期测试实例总的延期时间
+        self.actor_task_optimizer = SharedAdam(self.actor_task_model.parameters(), lr=self.learning_rate, eps=1e-4)
+        self.actor_machine_optimizer = SharedAdam(self.actor_machine_model.parameters(), lr=self.learning_rate, eps=1e-4)
+        self.critic_optimizer = SharedAdam(self.critic_model.parameters(), lr=self.learning_rate, eps=1e-4)
         self.episode_number = 0  # 当前训练周期
 
     def run_n_episodes(self):
@@ -126,9 +127,9 @@ class DA3C(Base_Agent, Config):
         self.optimizer_lock = multiprocessing.Lock()   # 创建锁对象，用于更新全局网络参数
         episodes_per_process = int(self.num_episodes_to_run / self.worker_processes) + 1
         processes = []  # 初始化线程列表
-        self.actor_net_task.share_memory()
-        self.actor_net_machine.share_memory()
-        self.critic_net.share_memory()
+        self.actor_task_model.share_memory()
+        self.actor_machine_model.share_memory()
+        self.critic_model.share_memory()
         self.actor_task_optimizer.share_memory()
         self.actor_machine_optimizer.share_memory()
         self.critic_optimizer.share_memory()
@@ -139,12 +140,12 @@ class DA3C(Base_Agent, Config):
         optimizer_worker.start()  # 启动总梯度更新主线程
 
         for process_num in range(self.worker_processes):
-            worker = Actor_Critic_Worker(process_num, self.actor_net_task, self.actor_net_machine, self.critic_net,
-                                         self.episode_number, self.delay_time, self.optimizer_lock, self.actor_task_optimizer,
+            worker = Actor_Critic_Worker(process_num, self.actor_task_model, self.actor_machine_model, self.critic_model,
+                                         self.episode_number, self.optimizer_lock, self.actor_task_optimizer,
                                          self.actor_machine_optimizer, self.critic_optimizer, self.hyper_parameters,
                                          episodes_per_process, self.epsilon_decay_rate_denominator,
-                                         copy.deepcopy(self.actor_net_task), copy.deepcopy(self.actor_net_machine),
-                                         copy.deepcopy(self.critic_net), gradient_updates_queue_actor_task,
+                                         copy.deepcopy(self.actor_task_model), copy.deepcopy(self.actor_machine_model),
+                                         copy.deepcopy(self.critic_model), gradient_updates_queue_actor_task,
                                          gradient_updates_queue_actor_machine, gradient_updates_queue_critic,
                                          self.environment_test)
             worker.start()  # 启动各子线程run()函数
@@ -159,11 +160,10 @@ class DA3C(Base_Agent, Config):
     def save_actor_model(self, save_model_boole=False):
         """保存全局策略网络"""
         if save_model_boole:
-            torch.save(self.actor_net_task.state_dict(), 'actor_net_task.ckpt')
-            torch.save(self.actor_net_machine.state_dict(), 'actor_net_machine.ckpt')
+            torch.save(self.actor_task_model.state_dict(), 'actor_task_model.ckpt')
+            torch.save(self.actor_machine_model.state_dict(), 'actor_machine_model.ckpt')
         else:
             print("该训练过程未保存模型")
-        return None
 
     def update_shared_model(self, gradient_updates_queue_actor_task,
                             gradient_updates_queue_actor_machine,
@@ -176,24 +176,23 @@ class DA3C(Base_Agent, Config):
             with self.optimizer_lock:
                 # 更新工序策略网络梯度
                 self.actor_task_optimizer.zero_grad()
-                for grads, params in zip(gradients_actor_task, self.actor_net_task.parameters()):
+                for grads, params in zip(gradients_actor_task, self.actor_task_model.parameters()):
                     params._grad = grads  # maybe need to do grads.clone()  # 子线程梯度值传递给全局网络参数
                 self.actor_task_optimizer.step()  # 依据传递的新的梯度值更新参数
                 # 更新机器策略网络梯度
                 self.actor_machine_optimizer.zero_grad()
-                for grads, params in zip(gradients_actor_machine, self.actor_net_machine.parameters()):
+                for grads, params in zip(gradients_actor_machine, self.actor_machine_model.parameters()):
                     params._grad = grads  # maybe need to do grads.clone()  # 子线程梯度值传递给全局网络参数
                 self.actor_machine_optimizer.step()  # 依据传递的新的梯度值更新参数
                 # 更新全局评论家网络梯度
                 self.critic_optimizer.zero_grad()
-                for grads, params in zip(gradients_critic, self.critic_net.parameters()):
+                for grads, params in zip(gradients_critic, self.critic_model.parameters()):
                     params._grad = grads
                 self.critic_optimizer.step()  # 依据传递的新的梯度值更新参数
-                # print("******************更新全局网络梯度值**********************")
 
 class Actor_Critic_Worker(torch.multiprocessing.Process):
     """演员评论工作者将玩游戏的指定集数 """
-    def __init__(self, worker_num, actor_task_model, actor_machine_model, critic_model, counter, delay_time, optimizer_lock,
+    def __init__(self, worker_num, actor_task_model, actor_machine_model, critic_model, counter, optimizer_lock,
                  actor_task_optimizer, actor_machine_optimizer, critic_optimizer, hyper_parameter, episodes_to_run,
                  epsilon_decay_denominator, local_actor_task_model, local_actor_machine_model, local_critic_model,
                  gradient_updates_queue_actor_task, gradient_updates_queue_actor_machine,
@@ -234,7 +233,6 @@ class Actor_Critic_Worker(torch.multiprocessing.Process):
         self.episode_log_action_task_probabilities = []  # 动作log概率列表
         self.episode_log_action_machine_probabilities = []  # 机器策略网络动作log概率列表
         self.critic_outputs = []  # 评论家输出的V值列表
-        self.delay_time = delay_time  # 总延期时间字典
 
     def generated_new_environment(self):
         """返回新环境对象"""
@@ -242,6 +240,14 @@ class Actor_Critic_Worker(torch.multiprocessing.Process):
         M = random.randint(10, 20)
         S = random.randint(1, 5)
         return SO_DFJSP_Environment(use_instance=True, DDT=DDT, M=M, S=S)
+
+    def save_actor_model(self, save_model_boole=False):
+        """保存全局最优策略网络"""
+        if save_model_boole:
+            torch.save(self.actor_task_model.state_dict(), 'actor_task_best_model.ckpt')
+            torch.save(self.actor_machine_model.state_dict(), 'actor_machine_best_model.ckpt')
+        else:
+            print("该训练过程未保存模型")
 
     def run(self):
         """开启工作线程"""
@@ -299,9 +305,7 @@ class Actor_Critic_Worker(torch.multiprocessing.Process):
                     state = next_state
                 vis.line(X=[self.counter.value], Y=[self.environment_test.delay_time_sum], win=win, update='append')
                 print("测试算例总的延期时间：", self.environment_test.delay_time_sum)
-                # 保存数据
-                self.delay_time['epoch'].append(self.counter.value)
-                self.delay_time['objective1'].append(self.environment_test.delay_time_sum)
+                add_data_object.add_data([self.counter.value, self.environment_test.delay_time_sum])  # 保存数据
 
     def calculate_new_exploration(self):
         """计算新的勘探参数。它在当前的上下3X范围内随机选取一个点"""
